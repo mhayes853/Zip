@@ -68,7 +68,8 @@ public class Zip {
     /**
      Set of vaild file extensions
      */
-    internal static var customFileExtensions: Set<String> = []
+    internal static nonisolated(unsafe) var customFileExtensions: Set<String> = []
+  private static let lock = NSLock()
     
     // MARK: Lifecycle
     
@@ -512,7 +513,9 @@ public class Zip {
      - parameter fileExtension: A file extension.
      */
     public class func addCustomFileExtension(_ fileExtension: String) {
+      _ = lock.withLock {
         customFileExtensions.insert(fileExtension)
+      }
     }
     
     /**
@@ -521,7 +524,9 @@ public class Zip {
      - parameter fileExtension: A file extension.
      */
     public class func removeCustomFileExtension(_ fileExtension: String) {
+      _ = lock.withLock {
         customFileExtensions.remove(fileExtension)
+      }
     }
     
     /**
@@ -532,10 +537,11 @@ public class Zip {
      - returns: true if the extension valid, otherwise false.
      */
     public class func isValidFileExtension(_ fileExtension: String) -> Bool {
-        
+      lock.withLock {
         let validFileExtensions: Set<String> = customFileExtensions.union(["zip", "cbz"])
         
         return validFileExtensions.contains(fileExtension)
+      }
     }
     
 }
