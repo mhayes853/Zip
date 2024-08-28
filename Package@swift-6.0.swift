@@ -1,4 +1,4 @@
-// swift-tools-version:4.2
+// swift-tools-version:6.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 import PackageDescription
 
@@ -8,16 +8,14 @@ let package = Package(
     .library(name: "Zip", targets: ["Zip"])
   ],
   targets: [
-    .systemLibrary(
-      name: "CZlib",
-      path: "Zip/zlib",
-      pkgConfig: "zlib"
-    ),
     .target(
       name: "Minizip",
-      dependencies: ["CZlib"],
+      dependencies: [],
       path: "Zip/minizip",
-      exclude: ["module"]
+      exclude: ["module"],
+      linkerSettings: [
+        .linkedLibrary("z")
+      ]
     ),
     .target(
       name: "Zip",
@@ -28,7 +26,8 @@ let package = Package(
     .testTarget(
       name: "ZipTests",
       dependencies: ["Zip"],
-      path: "ZipTests"
+      path: "ZipTests",
+      resources: [.process("Resources")]
     )
   ]
 )
