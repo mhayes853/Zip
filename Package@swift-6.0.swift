@@ -29,5 +29,6 @@ let package = Package(
       path: "ZipTests",
       resources: [.process("Resources")]
     )
-  ]
+  ],
+  swiftLanguageVersions: [.v6]
 )
