@@ -353,4 +353,81 @@ class ZipTests: XCTestCase {
     XCTAssertTrue(Zip.isValidFileExtension("zip"))
     XCTAssertTrue(Zip.isValidFileExtension("cbz"))
   }
+  
+  func testZipFileHeader() throws {
+    let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    let extraData = Data("extra data".utf8)
+    try Zip.zipFiles(
+      paths: [imageURL],
+      zipFilePath: zipFilePath,
+      password: nil,
+      globalExtraData: extraData,
+      progress: nil
+    )
+    let header = try Zip.unzipHeader(zipFilePath)
+    XCTAssertEqual(header.extraData, extraData)
+  }
+  
+  func testZipFileHeaderWithPassword() throws {
+    let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    let extraData = Data("extra data".utf8)
+    try Zip.zipFiles(
+      paths: [imageURL],
+      zipFilePath: zipFilePath,
+      password: "password",
+      globalExtraData: extraData,
+      progress: nil
+    )
+    let header = try Zip.unzipHeader(zipFilePath)
+    XCTAssertEqual(header.extraData, extraData)
+  }
+  
+  func testZipFileHeaderWithNoExtraData() throws {
+    let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    try Zip.zipFiles(
+      paths: [imageURL],
+      zipFilePath: zipFilePath,
+      password: "password",
+      progress: nil
+    )
+    XCTAssertNil(try Zip.unzipHeader(zipFilePath).extraData)
+  }
+  
+  func testZipFileHeaderWithLotsOfExtraData() throws {
+    let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    let extraData = Data(String(repeating: "a", count: Int.random(in: 9000..<11_000)).utf8)
+    try Zip.zipFiles(
+      paths: [imageURL],
+      zipFilePath: zipFilePath,
+      password: "password",
+      globalExtraData: extraData,
+      progress: nil
+    )
+    XCTAssertEqual(try Zip.unzipHeader(zipFilePath).extraData, extraData)
+  }
+  
+  func testZipFileHeaderThrowsWhenFileNotFound() throws {
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    XCTAssertThrowsError(try Zip.unzipHeader(zipFilePath)) { error in
+      XCTAssertEqual(error as? ZipError, .fileNotFound)
+    }
+  }
+  
+  func testZipFileHeaderThrowsWhenInvalidFileExtension() throws {
+    let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.tif")
+    try Zip.zipFiles(
+      paths: [imageURL],
+      zipFilePath: zipFilePath,
+      password: "password",
+      progress: nil
+    )
+    XCTAssertThrowsError(try Zip.unzipHeader(zipFilePath)) { error in
+      XCTAssertEqual(error as? ZipError, .fileNotFound)
+    }
+  }
 }
