@@ -362,7 +362,7 @@ class ZipTests: XCTestCase {
       paths: [imageURL],
       zipFilePath: zipFilePath,
       password: nil,
-      extraData: extraData,
+      globalExtraData: extraData,
       progress: nil
     )
     let header = try Zip.unzipHeader(zipFilePath)
@@ -377,7 +377,7 @@ class ZipTests: XCTestCase {
       paths: [imageURL],
       zipFilePath: zipFilePath,
       password: "password",
-      extraData: extraData,
+      globalExtraData: extraData,
       progress: nil
     )
     let header = try Zip.unzipHeader(zipFilePath)
@@ -404,7 +404,7 @@ class ZipTests: XCTestCase {
       paths: [imageURL],
       zipFilePath: zipFilePath,
       password: "password",
-      extraData: extraData,
+      globalExtraData: extraData,
       progress: nil
     )
     XCTAssertEqual(try Zip.unzipHeader(zipFilePath).extraData, extraData)

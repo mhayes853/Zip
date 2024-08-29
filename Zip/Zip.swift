@@ -68,9 +68,7 @@ public struct ZipHeader {
   init(file: unzFile) throws {
     var info = unz_file_info()
     var result = unzGetCurrentFileInfo(file, &info, nil, 0, nil, 0, nil, 0)
-    if result != UNZ_OK {
-      throw ZipError.unzipFail
-    }
+    guard result == UNZ_OK else { throw ZipError.unzipFail }
     var extraData = Data(count: Int(info.size_file_extra))
     result = extraData.withUnsafeMutableBytes { dataPtr in
       unzGetCurrentFileInfo(
@@ -84,9 +82,7 @@ public struct ZipHeader {
         0
       )
     }
-    if result != UNZ_OK {
-      throw ZipError.unzipFail
-    }
+    guard result == UNZ_OK else { throw ZipError.unzipFail }
     self.extraData = info.size_file_extra > 0 ? extraData : nil
   }
 }
@@ -346,7 +342,7 @@ public class Zip {
    - parameter zipFilePath: Destination NSURL, should lead to a .zip filepath.
    - parameter password:    Password string. Optional.
    - parameter compression: Compression strategy
-   - parameter extraData:   Data to attach to the "extra" field of the zip header.
+   - parameter globalExtraData: Data to attach to the "extra" field of the zip header.
    - parameter progress: A progress closure called after unzipping each file in the archive. Double value betweem 0 and 1.
    
    - throws: Error if zipping fails.
@@ -358,7 +354,7 @@ public class Zip {
     zipFilePath: URL,
     password: String?,
     compression: ZipCompression = .DefaultCompression,
-    extraData: Data? = nil,
+    globalExtraData: Data? = nil,
     progress: ((_ progress: Double) -> Void)?
   ) throws {
     
@@ -433,48 +429,14 @@ public class Zip {
         guard let buffer = malloc(chunkSize) else {
           throw ZipError.zipFail
         }
-        var extraData = extraData.flatMap { [UInt8]($0) } ?? []
-        if let password = password, let fileName = fileName {
-          zipOpenNewFileInZip3(
-            zip,
-            fileName,
-            &zipInfo,
-            nil,
-            0,
-            &extraData,
-            UInt32(extraData.count),
-            nil,
-            Z_DEFLATED,
-            compression.minizipCompression,
-            0,
-            -MAX_WBITS,
-            DEF_MEM_LEVEL,
-            Z_DEFAULT_STRATEGY,
-            password,
-            0
-          )
-        } else if let fileName = fileName {
-          zipOpenNewFileInZip3(
-            zip,
-            fileName,
-            &zipInfo,
-            nil,
-            0,
-            &extraData,
-            UInt32(extraData.count),
-            nil,
-            Z_DEFLATED,
-            compression.minizipCompression,
-            0,
-            -MAX_WBITS,
-            DEF_MEM_LEVEL,
-            Z_DEFAULT_STRATEGY,
-            nil,
-            0
-          )
-        } else {
-          throw ZipError.zipFail
-        }
+        try openNewFileInZip3(
+          file: zip,
+          filename: fileName,
+          info: &zipInfo,
+          password: password,
+          globalExtraData: globalExtraData,
+          compression: compression
+        )
         var length: Int = 0
         while feof(input) == 0 {
           length = fread(buffer, 1, chunkSize, input)
@@ -511,6 +473,7 @@ public class Zip {
    - parameter zipFilePath: Destination NSURL, should lead to a .zip filepath.
    - parameter password:    Password string. Optional.
    - parameter compression: Compression strategy
+   - parameter globalExtraData: Data to attach to the "extra" field of the zip header.
    - parameter progress: A progress closure called after unzipping each file in the archive. Double value betweem 0 and 1.
    
    - throws: Error if zipping fails.
@@ -522,6 +485,7 @@ public class Zip {
     zipFilePath: URL,
     password: String?,
     compression: ZipCompression = .DefaultCompression,
+    globalExtraData: Data? = nil,
     progress: ((_ progress: Double) -> Void)?
   ) throws {
     
@@ -569,23 +533,13 @@ public class Zip {
       }
       
       // Write the data as a file to zip
-      zipOpenNewFileInZip3(
-        zip,
-        archiveFile.filename,
-        &zipInfo,
-        nil,
-        0,
-        nil,
-        0,
-        nil,
-        Z_DEFLATED,
-        compression.minizipCompression,
-        0,
-        -MAX_WBITS,
-        DEF_MEM_LEVEL,
-        Z_DEFAULT_STRATEGY,
-        password,
-        0
+      try openNewFileInZip3(
+        file: zip,
+        filename: archiveFile.filename,
+        info: &zipInfo,
+        password: password,
+        globalExtraData: globalExtraData,
+        compression: compression
       )
       zipWriteInFileInZip(zip, archiveFile.data.bytes, UInt32(archiveFile.data.length))
       zipCloseFileInZip(zip)
@@ -608,6 +562,37 @@ public class Zip {
     }
     
     progressTracker.completedUnitCount = Int64(totalSize)
+  }
+  
+  @discardableResult
+  private class func openNewFileInZip3(
+    file: zipFile?,
+    filename: String?,
+    info: inout zip_fileinfo,
+    password: String?,
+    globalExtraData: Data?,
+    compression: ZipCompression
+  ) throws -> Int32 {
+    var extraData = globalExtraData.flatMap { [UInt8]($0) } ?? []
+    guard let filename else { throw ZipError.unzipFail }
+    return zipOpenNewFileInZip3(
+      file,
+      filename,
+      &info,
+      nil,
+      0,
+      &extraData,
+      UInt32(extraData.count),
+      nil,
+      Z_DEFLATED,
+      compression.minizipCompression,
+      0,
+      -MAX_WBITS,
+      DEF_MEM_LEVEL,
+      Z_DEFAULT_STRATEGY,
+      password,
+      0
+    )
   }
   
   /**
