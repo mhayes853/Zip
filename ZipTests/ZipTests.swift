@@ -384,6 +384,20 @@ class ZipTests: XCTestCase {
     XCTAssertEqual(header.extraData, extraData)
   }
   
+  func testZipFileHeaderWithoutPasswordDoesNotDetect11ExtraDataBytesAsAESInfo() throws {
+    let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    let extraData = Data("extra data1".utf8)
+    try Zip.zipFiles(
+      paths: [imageURL],
+      zipFilePath: zipFilePath,
+      password: nil,
+      globalExtraData: extraData,
+      progress: nil
+    )
+    XCTAssertFalse(try Zip.unzipHeader(zipFilePath).isAESEncrypted)
+  }
+  
   func testZipFileHeaderWithNoExtraData() throws {
     let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
     let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
@@ -408,6 +422,35 @@ class ZipTests: XCTestCase {
       progress: nil
     )
     XCTAssertEqual(try Zip.unzipHeader(zipFilePath).extraData, extraData)
+  }
+  
+  func testZipHeaderWithoutPasswordNoAESInfo() throws {
+    let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    try Zip.zipFiles(
+      paths: [imageURL],
+      zipFilePath: zipFilePath,
+      password: nil,
+      globalExtraData: Data("extra data".utf8),
+      progress: nil
+    )
+    let header = try Zip.unzipHeader(zipFilePath)
+    XCTAssertFalse(header.isAESEncrypted)
+  }
+  
+  func testZipHeaderWithPasswordAESInfoWithExtraData() throws {
+    let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    let extraData = Data("extra data".utf8)
+    try Zip.zipFiles(
+      paths: [imageURL],
+      zipFilePath: zipFilePath,
+      password: "password",
+      globalExtraData: extraData,
+      progress: nil
+    )
+    let header = try Zip.unzipHeader(zipFilePath)
+    XCTAssertTrue(header.isAESEncrypted)
   }
   
   func testZipFileHeaderThrowsWhenFileNotFound() throws {

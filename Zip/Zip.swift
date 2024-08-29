@@ -64,6 +64,7 @@ public struct ArchiveFile {
 /// A data type for the header of a zip file.
 public struct ZipHeader {
   public let extraData: Data?
+  public let isAESEncrypted: Bool
   
   init(file: unzFile) throws {
     var info = unz_file_info()
@@ -83,9 +84,22 @@ public struct ZipHeader {
       )
     }
     guard result == UNZ_OK else { throw ZipError.unzipFail }
-    self.extraData = info.size_file_extra > 0 ? extraData : nil
+    if info.size_file_extra >= aesHeaderSize {
+      let aesInfoStart = extraData.count - aesHeaderSize
+      let aesHeaderIdData = extraData[aesInfoStart...(aesInfoStart + 1)]
+      self.isAESEncrypted = aesHeaderIdData.withUnsafeBytes {
+        $0.loadUnaligned(as: UInt16.self) == aesHeaderId
+      }
+      self.extraData = extraData[0..<aesInfoStart]
+    } else {
+      self.extraData = info.size_file_extra > 0 ? extraData : nil
+      self.isAESEncrypted = false
+    }
   }
 }
+
+private let aesHeaderSize = 11
+private let aesHeaderId = UInt16(0x9901)
 
 /// Zip class
 public class Zip {
@@ -191,7 +205,7 @@ public class Zip {
       //let fileName = UnsafeMutablePointer<CChar>(allocatingCapacity: fileNameSize)
       let fileName = UnsafeMutablePointer<CChar>.allocate(capacity: fileNameSize)
       
-      unzGetCurrentFileInfo64(zip, &fileInfo, fileName, UInt(fileNameSize), nil, 0, nil, 0)
+      unzGetCurrentFileInfo64(zip, &fileInfo, fileName, UInt16(fileNameSize), nil, 0, nil, 0)
       fileName[Int(fileInfo.size_filename)] = 0
       
       var pathString = String(cString: fileName)
@@ -403,24 +417,14 @@ public class Zip {
         defer { fclose(input) }
         let fileName = path.fileName
         var zipInfo: zip_fileinfo = zip_fileinfo(
-          tmz_date: tm_zip(tm_sec: 0, tm_min: 0, tm_hour: 0, tm_mday: 0, tm_mon: 0, tm_year: 0),
-          dosDate: 0,
+          dos_date: 0,
           internal_fa: 0,
           external_fa: 0
         )
         do {
           let fileAttributes = try fileManager.attributesOfItem(atPath: filePath)
           if let fileDate = fileAttributes[FileAttributeKey.modificationDate] as? Date {
-            let components = Calendar.current.dateComponents(
-              [.year, .month, .day, .hour, .minute, .second],
-              from: fileDate
-            )
-            zipInfo.tmz_date.tm_sec = UInt32(components.second!)
-            zipInfo.tmz_date.tm_min = UInt32(components.minute!)
-            zipInfo.tmz_date.tm_hour = UInt32(components.hour!)
-            zipInfo.tmz_date.tm_mday = UInt32(components.day!)
-            zipInfo.tmz_date.tm_mon = UInt32(components.month!) - 1
-            zipInfo.tmz_date.tm_year = UInt32(components.year!)
+            zipInfo.dos_date = fileDate.dosDate
           }
           if let fileSize = fileAttributes[FileAttributeKey.size] as? Double {
             currentPosition += fileSize
@@ -516,20 +520,13 @@ public class Zip {
       
       // Setup the zip file info
       var zipInfo = zip_fileinfo(
-        tmz_date: tm_zip(tm_sec: 0, tm_min: 0, tm_hour: 0, tm_mday: 0, tm_mon: 0, tm_year: 0),
-        dosDate: 0,
+        dos_date: 0,
         internal_fa: 0,
         external_fa: 0
       )
       
       if let modifiedTime = archiveFile.modifiedTime {
-        let calendar = Calendar.current
-        zipInfo.tmz_date.tm_sec = UInt32(calendar.component(.second, from: modifiedTime))
-        zipInfo.tmz_date.tm_min = UInt32(calendar.component(.minute, from: modifiedTime))
-        zipInfo.tmz_date.tm_hour = UInt32(calendar.component(.hour, from: modifiedTime))
-        zipInfo.tmz_date.tm_mday = UInt32(calendar.component(.day, from: modifiedTime))
-        zipInfo.tmz_date.tm_mon = UInt32(calendar.component(.month, from: modifiedTime))
-        zipInfo.tmz_date.tm_year = UInt32(calendar.component(.year, from: modifiedTime))
+        zipInfo.dos_date = modifiedTime.dosDate
       }
       
       // Write the data as a file to zip
@@ -582,9 +579,9 @@ public class Zip {
       nil,
       0,
       &extraData,
-      UInt32(extraData.count),
+      UInt16(extraData.count),
       nil,
-      Z_DEFLATED,
+      UInt16(Z_DEFLATED),
       compression.minizipCompression,
       0,
       -MAX_WBITS,
@@ -646,4 +643,17 @@ public class Zip {
     }
   }
   
+}
+
+extension Date {
+  fileprivate var dosDate: UInt32 {
+    let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: self)
+    let year = UInt32(components.year! - 1980) << 25
+    let month = UInt32(components.month!) << 21
+    let day = UInt32(components.day!) << 16
+    let hour = UInt32(components.hour!) << 11
+    let minute = UInt32(components.minute!) << 5
+    let second = UInt32(components.second!) >> 1
+    return year | month | day | hour | minute | second
+  }
 }
