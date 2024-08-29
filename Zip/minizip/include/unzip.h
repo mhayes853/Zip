@@ -23,6 +23,8 @@
 extern "C" {
 #endif
 
+#define HAVE_AES 1
+
 #ifndef _ZLIB_H
 #include "zlib.h"
 #endif

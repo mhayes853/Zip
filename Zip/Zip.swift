@@ -64,6 +64,7 @@ public struct ArchiveFile {
 /// A data type for the header of a zip file.
 public struct ZipHeader {
   public let extraData: Data?
+  public let isAESEncrypted: Bool
   
   init(file: unzFile) throws {
     var info = unz_file_info()
@@ -83,9 +84,22 @@ public struct ZipHeader {
       )
     }
     guard result == UNZ_OK else { throw ZipError.unzipFail }
-    self.extraData = info.size_file_extra > 0 ? extraData : nil
+    if info.size_file_extra >= aesHeaderSize {
+      let aesInfoStart = extraData.count - aesHeaderSize
+      let aesHeaderIdData = extraData[aesInfoStart...(aesInfoStart + 1)]
+      self.isAESEncrypted = aesHeaderIdData.withUnsafeBytes {
+        $0.loadUnaligned(as: UInt16.self) == aesHeaderId
+      }
+      self.extraData = extraData[0..<aesInfoStart]
+    } else {
+      self.extraData = info.size_file_extra > 0 ? extraData : nil
+      self.isAESEncrypted = false
+    }
   }
 }
+
+private let aesHeaderSize = 11
+private let aesHeaderId = UInt16(0x9901)
 
 /// Zip class
 public class Zip {
