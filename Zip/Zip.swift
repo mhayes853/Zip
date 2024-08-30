@@ -9,147 +9,6 @@
 import Foundation
 @_implementationOnly import Minizip
 
-/// Zip error type
-public enum ZipError: Error {
-  /// File not found
-  case fileNotFound
-  /// Unzip fail
-  case unzipFail
-  /// Zip fail
-  case zipFail
-  
-  /// User readable description
-  public var description: String {
-    switch self {
-    case .fileNotFound: return NSLocalizedString("File not found.", comment: "")
-    case .unzipFail: return NSLocalizedString("Failed to unzip file.", comment: "")
-    case .zipFail: return NSLocalizedString("Failed to zip file.", comment: "")
-    }
-  }
-}
-
-public enum ZipCompression: Int {
-  case NoCompression
-  case BestSpeed
-  case DefaultCompression
-  case BestCompression
-  
-  internal var minizipCompression: Int32 {
-    switch self {
-    case .NoCompression:
-      return Z_NO_COMPRESSION
-    case .BestSpeed:
-      return Z_BEST_SPEED
-    case .DefaultCompression:
-      return Z_DEFAULT_COMPRESSION
-    case .BestCompression:
-      return Z_BEST_COMPRESSION
-    }
-  }
-}
-
-/// Data in memory that will be archived as a file.
-public struct ArchiveFile {
-  var filename: String
-  var data: NSData
-  var modifiedTime: Date?
-  
-  public init(filename: String, data: NSData, modifiedTime: Date?) {
-    self.filename = filename
-    self.data = data
-    self.modifiedTime = modifiedTime
-  }
-}
-
-/// A data type for the header of a zip file.
-public struct ZipHeader {
-  public let extraData: Data?
-  public let compressionMethod: ZipCompressionMethod
-  
-  public var extraFields: [ZipExtraField]? {
-    self.extraData.flatMap { data in
-      data.withUnsafeBytes { dataPtr in
-        var byteIndex = 0
-        var fields = [ZipExtraField]()
-        while byteIndex < data.count {
-          let header = data[byteIndex..<(byteIndex + 4)].withUnsafeBytes {
-            $0.assumingMemoryBound(to: ExtraFieldHeader.self).baseAddress?.pointee
-          }
-          guard let header else { return fields }
-          byteIndex += 4
-          let byteIndexEnd = byteIndex + Int(header.dataSize)
-          guard byteIndexEnd <= data.count else { return fields }
-          fields.append(ZipExtraField(id: header.id, data: data[byteIndex..<byteIndexEnd]))
-          byteIndex = byteIndexEnd
-        }
-        return fields
-      }
-    }
-  }
-  
-  init(file: unzFile) throws {
-    var info = unz_file_info()
-    var result = unzGetCurrentFileInfo(file, &info, nil, 0, nil, 0, nil, 0)
-    guard result == UNZ_OK else { throw ZipError.unzipFail }
-    var extraData = Data(count: Int(info.size_file_extra))
-    result = extraData.withUnsafeMutableBytes { dataPtr in
-      unzGetCurrentFileInfo(
-        file,
-        nil,
-        nil,
-        0,
-        dataPtr.baseAddress,
-        info.size_file_extra,
-        nil,
-        0
-      )
-    }
-    guard result == UNZ_OK else { throw ZipError.unzipFail }
-    self.extraData = info.size_file_extra > 0 ? extraData : nil
-    self.compressionMethod = ZipCompressionMethod(rawValue: info.compression_method)
-  }
-}
-
-public struct ZipCompressionMethod: RawRepresentable, Hashable, Sendable {
-  public let rawValue: UInt16
-  
-  public init(rawValue: UInt16) {
-    self.rawValue = rawValue
-  }
-}
-
-extension ZipCompressionMethod {
-  public static let aes = Self(rawValue: 99)
-  public static let deflated = Self(rawValue: 8)
-}
-
-private struct ExtraFieldHeader {
-  let id: ZipExtraField.ID
-  let dataSize: UInt16
-}
-
-public struct ZipExtraField: Hashable, Sendable, Identifiable {
-  public let id: ID
-  public let dataSize: UInt16
-  public let data: Data
-  
-  public init(id: ID, data: Data) {
-    self.id = id
-    self.dataSize = UInt16(data.count)
-    self.data = data
-  }
-}
-
-extension ZipExtraField {
-  public struct ID: Hashable, Sendable, RawRepresentable {
-    public let rawValue: UInt16
-    
-    public init(rawValue: UInt16) {
-      self.rawValue = rawValue
-    }
-  }
-}
-
 /// Zip class
 public class Zip {
   
@@ -168,9 +27,11 @@ public class Zip {
    */
   public init() {
   }
-  
-  // MARK: Unzip
-  
+}
+
+// MARK: - Unzip
+
+extension Zip {
   /**
    Unzip file
    
@@ -184,7 +45,6 @@ public class Zip {
    
    - notes: Supports implicit progress composition
    */
-  
   public class func unzipFile(
     _ zipFilePath: URL,
     destination: URL,
@@ -383,21 +243,23 @@ public class Zip {
     
   }
   
-  /// Unzips the header of a zip file.
+  /// Returns the file info of a zip file.
   ///
   /// - Parameter zipFilePath: Local file path of zipped file.
-  /// - Returns: A  ``ZipHeader``.
-  public class func unzipHeader(_ zipFilePath: URL) throws -> ZipHeader {
+  /// - Returns: An  ``UnzipFileInfo`` instance.
+  public class func unzipFileInfo(_ zipFilePath: URL) throws -> UnzipFileInfo {
     guard
       !fileExtensionIsInvalid(zipFilePath.pathExtension),
       let file = unzOpen64(zipFilePath.path)
     else { throw ZipError.fileNotFound }
     defer { unzClose(file) }
-    return try ZipHeader(file: file)
+    return try UnzipFileInfo(file: file)
   }
-  
-  // MARK: Zip
-  
+}
+
+// MARK: - Zip Files
+
+extension Zip {
   /**
    Zip files.
    
@@ -422,10 +284,7 @@ public class Zip {
   ) throws {
     var data = Data()
     for field in globalExtraFields {
-      data.append(
-        withUnsafeBytes(of: ExtraFieldHeader(id: field.id, dataSize: field.dataSize)) { Data($0) }
-      )
-      data.append(contentsOf: [UInt8](field.data))
+      data.append(field.combinedData)
     }
     try zipFiles(
       paths: paths,
@@ -513,7 +372,7 @@ public class Zip {
         do {
           let fileAttributes = try fileManager.attributesOfItem(atPath: filePath)
           if let fileDate = fileAttributes[FileAttributeKey.modificationDate] as? Date {
-            zipInfo.dos_date = fileDate.dosDate
+            zipInfo.dos_date = fileDate.dosDate()
           }
           if let fileSize = fileAttributes[FileAttributeKey.size] as? Double {
             currentPosition += fileSize
@@ -615,7 +474,7 @@ public class Zip {
       )
       
       if let modifiedTime = archiveFile.modifiedTime {
-        zipInfo.dos_date = modifiedTime.dosDate
+        zipInfo.dos_date = modifiedTime.dosDate()
       }
       
       // Write the data as a file to zip
@@ -680,6 +539,11 @@ public class Zip {
       0
     )
   }
+}
+
+// MARK: - File Extensions
+
+extension Zip {
   
   /**
    Check if file extension is invalid.
@@ -732,17 +596,4 @@ public class Zip {
     }
   }
   
-}
-
-extension Date {
-  fileprivate var dosDate: UInt32 {
-    let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: self)
-    let year = UInt32(components.year! - 1980) << 25
-    let month = UInt32(components.month!) << 21
-    let day = UInt32(components.day!) << 16
-    let hour = UInt32(components.hour!) << 11
-    let minute = UInt32(components.minute!) << 5
-    let second = UInt32(components.second!) >> 1
-    return year | month | day | hour | minute | second
-  }
 }
