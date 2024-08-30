@@ -9,98 +9,6 @@
 import Foundation
 @_implementationOnly import Minizip
 
-/// Zip error type
-public enum ZipError: Error {
-  /// File not found
-  case fileNotFound
-  /// Unzip fail
-  case unzipFail
-  /// Zip fail
-  case zipFail
-  
-  /// User readable description
-  public var description: String {
-    switch self {
-    case .fileNotFound: return NSLocalizedString("File not found.", comment: "")
-    case .unzipFail: return NSLocalizedString("Failed to unzip file.", comment: "")
-    case .zipFail: return NSLocalizedString("Failed to zip file.", comment: "")
-    }
-  }
-}
-
-public enum ZipCompression: Int {
-  case NoCompression
-  case BestSpeed
-  case DefaultCompression
-  case BestCompression
-  
-  internal var minizipCompression: Int32 {
-    switch self {
-    case .NoCompression:
-      return Z_NO_COMPRESSION
-    case .BestSpeed:
-      return Z_BEST_SPEED
-    case .DefaultCompression:
-      return Z_DEFAULT_COMPRESSION
-    case .BestCompression:
-      return Z_BEST_COMPRESSION
-    }
-  }
-}
-
-/// Data in memory that will be archived as a file.
-public struct ArchiveFile {
-  var filename: String
-  var data: NSData
-  var modifiedTime: Date?
-  
-  public init(filename: String, data: NSData, modifiedTime: Date?) {
-    self.filename = filename
-    self.data = data
-    self.modifiedTime = modifiedTime
-  }
-}
-
-/// A data type for the header of a zip file.
-public struct ZipHeader {
-  public let extraData: Data?
-  public let isAESEncrypted: Bool
-  
-  init(file: unzFile) throws {
-    var info = unz_file_info()
-    var result = unzGetCurrentFileInfo(file, &info, nil, 0, nil, 0, nil, 0)
-    guard result == UNZ_OK else { throw ZipError.unzipFail }
-    var extraData = Data(count: Int(info.size_file_extra))
-    result = extraData.withUnsafeMutableBytes { dataPtr in
-      unzGetCurrentFileInfo(
-        file,
-        nil,
-        nil,
-        0,
-        dataPtr.baseAddress,
-        info.size_file_extra,
-        nil,
-        0
-      )
-    }
-    guard result == UNZ_OK else { throw ZipError.unzipFail }
-    if info.size_file_extra >= aesHeaderSize {
-      let aesInfoStart = extraData.count - aesHeaderSize
-      let aesHeaderIdData = extraData[aesInfoStart...(aesInfoStart + 1)]
-      self.isAESEncrypted = aesHeaderIdData.withUnsafeBytes {
-        $0.loadUnaligned(as: UInt16.self) == aesHeaderId
-      }
-      self.extraData = extraData[0..<aesInfoStart]
-    } else {
-      self.extraData = info.size_file_extra > 0 ? extraData : nil
-      self.isAESEncrypted = false
-    }
-  }
-}
-
-private let aesHeaderSize = 11
-private let aesHeaderId = UInt16(0x9901)
-
 /// Zip class
 public class Zip {
   
@@ -119,9 +27,11 @@ public class Zip {
    */
   public init() {
   }
-  
-  // MARK: Unzip
-  
+}
+
+// MARK: - Unzip
+
+extension Zip {
   /**
    Unzip file
    
@@ -135,7 +45,6 @@ public class Zip {
    
    - notes: Supports implicit progress composition
    */
-  
   public class func unzipFile(
     _ zipFilePath: URL,
     destination: URL,
@@ -334,20 +243,58 @@ public class Zip {
     
   }
   
-  /// Unzips the header of a zip file.
+  /// Returns the file info of a zip file.
   ///
   /// - Parameter zipFilePath: Local file path of zipped file.
-  /// - Returns: A  ``ZipHeader``.
-  public class func unzipHeader(_ zipFilePath: URL) throws -> ZipHeader {
+  /// - Returns: An  ``UnzipFileInfo`` instance.
+  public class func unzipFileInfo(_ zipFilePath: URL) throws -> UnzipFileInfo {
     guard
       !fileExtensionIsInvalid(zipFilePath.pathExtension),
       let file = unzOpen64(zipFilePath.path)
     else { throw ZipError.fileNotFound }
     defer { unzClose(file) }
-    return try ZipHeader(file: file)
+    return try UnzipFileInfo(file: file)
   }
-  
-  // MARK: Zip
+}
+
+// MARK: - Zip Files
+
+extension Zip {
+  /**
+   Zip files.
+   
+   - parameter paths:       Array of NSURL filepaths.
+   - parameter zipFilePath: Destination NSURL, should lead to a .zip filepath.
+   - parameter password:    Password string. Optional.
+   - parameter compression: Compression strategy
+   - parameter globalExtraFields: An array of ``ZipExtraField``s to use as extra data.
+   - parameter progress: A progress closure called after unzipping each file in the archive. Double value betweem 0 and 1.
+   
+   - throws: Error if zipping fails.
+   
+   - notes: Supports implicit progress composition
+   */
+  public class func zipFiles(
+    paths: [URL],
+    zipFilePath: URL,
+    password: String?,
+    compression: ZipCompression = .DefaultCompression,
+    globalExtraFields: [ZipExtraField] = [],
+    progress: ((_ progress: Double) -> Void)?
+  ) throws {
+    var data = Data()
+    for field in globalExtraFields {
+      data.append(field.combinedData)
+    }
+    try zipFiles(
+      paths: paths,
+      zipFilePath: zipFilePath,
+      password: password,
+      compression: compression,
+      globalExtraData: data,
+      progress: progress
+    )
+  }
   
   /**
    Zip files.
@@ -363,6 +310,7 @@ public class Zip {
    
    - notes: Supports implicit progress composition
    */
+  @_disfavoredOverload
   public class func zipFiles(
     paths: [URL],
     zipFilePath: URL,
@@ -424,7 +372,7 @@ public class Zip {
         do {
           let fileAttributes = try fileManager.attributesOfItem(atPath: filePath)
           if let fileDate = fileAttributes[FileAttributeKey.modificationDate] as? Date {
-            zipInfo.dos_date = fileDate.dosDate
+            zipInfo.dos_date = fileDate.dosDate()
           }
           if let fileSize = fileAttributes[FileAttributeKey.size] as? Double {
             currentPosition += fileSize
@@ -526,7 +474,7 @@ public class Zip {
       )
       
       if let modifiedTime = archiveFile.modifiedTime {
-        zipInfo.dos_date = modifiedTime.dosDate
+        zipInfo.dos_date = modifiedTime.dosDate()
       }
       
       // Write the data as a file to zip
@@ -591,6 +539,11 @@ public class Zip {
       0
     )
   }
+}
+
+// MARK: - File Extensions
+
+extension Zip {
   
   /**
    Check if file extension is invalid.
@@ -643,17 +596,4 @@ public class Zip {
     }
   }
   
-}
-
-extension Date {
-  fileprivate var dosDate: UInt32 {
-    let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: self)
-    let year = UInt32(components.year! - 1980) << 25
-    let month = UInt32(components.month!) << 21
-    let day = UInt32(components.day!) << 16
-    let hour = UInt32(components.hour!) << 11
-    let minute = UInt32(components.minute!) << 5
-    let second = UInt32(components.second!) >> 1
-    return year | month | day | hour | minute | second
-  }
 }
