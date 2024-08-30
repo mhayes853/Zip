@@ -369,7 +369,7 @@ class ZipTests: XCTestCase {
     XCTAssertEqual(header.extraData, extraData)
   }
   
-  func testZipFileHeaderWithPassword() throws {
+  func testZipFileHeaderWithPasswordAndNonConformantExtraDataAddsAESExtraData() throws {
     let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
     let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
     let extraData = Data("extra data".utf8)
@@ -381,7 +381,8 @@ class ZipTests: XCTestCase {
       progress: nil
     )
     let header = try Zip.unzipHeader(zipFilePath)
-    XCTAssertEqual(header.extraData, extraData)
+    XCTAssertEqual(header.extraData?[0..<10], extraData)
+    XCTAssertEqual(header.extraData?.count, 21)
   }
   
   func testZipFileHeaderWithoutPasswordDoesNotDetect11ExtraDataBytesAsAESInfo() throws {
@@ -395,7 +396,8 @@ class ZipTests: XCTestCase {
       globalExtraData: extraData,
       progress: nil
     )
-    XCTAssertFalse(try Zip.unzipHeader(zipFilePath).isAESEncrypted)
+    let header = try Zip.unzipHeader(zipFilePath)
+    XCTAssertEqual(header.compressionMethod, .deflated)
   }
   
   func testZipFileHeaderWithNoExtraData() throws {
@@ -404,10 +406,12 @@ class ZipTests: XCTestCase {
     try Zip.zipFiles(
       paths: [imageURL],
       zipFilePath: zipFilePath,
-      password: "password",
+      password: nil,
       progress: nil
     )
-    XCTAssertNil(try Zip.unzipHeader(zipFilePath).extraData)
+    let header = try Zip.unzipHeader(zipFilePath)
+    XCTAssertNil(header.extraData)
+    XCTAssertNil(header.extraFields)
   }
   
   func testZipFileHeaderWithLotsOfExtraData() throws {
@@ -417,7 +421,7 @@ class ZipTests: XCTestCase {
     try Zip.zipFiles(
       paths: [imageURL],
       zipFilePath: zipFilePath,
-      password: "password",
+      password: nil,
       globalExtraData: extraData,
       progress: nil
     )
@@ -435,22 +439,66 @@ class ZipTests: XCTestCase {
       progress: nil
     )
     let header = try Zip.unzipHeader(zipFilePath)
-    XCTAssertFalse(header.isAESEncrypted)
+    XCTAssertEqual(header.compressionMethod, .deflated)
   }
   
-  func testZipHeaderWithPasswordAESInfoWithExtraData() throws {
+  func testZipHeaderWithPasswordAESInfoWithNonConformingExtraData() throws {
     let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
     let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
-    let extraData = Data("extra data".utf8)
     try Zip.zipFiles(
       paths: [imageURL],
       zipFilePath: zipFilePath,
       password: "password",
-      globalExtraData: extraData,
+      globalExtraData: Data("extra data".utf8),
       progress: nil
     )
     let header = try Zip.unzipHeader(zipFilePath)
-    XCTAssertTrue(header.isAESEncrypted)
+    XCTAssertEqual(header.compressionMethod, .aes)
+  }
+  
+  func testZipHeaderWithPasswordUsesAESMethod() throws {
+    let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    try Zip.zipFiles(
+      paths: [imageURL],
+      zipFilePath: zipFilePath,
+      password: "password",
+      progress: nil
+    )
+    let header = try Zip.unzipHeader(zipFilePath)
+    XCTAssertEqual(header.compressionMethod, .aes)
+  }
+  
+  func testZipHeaderWithExtraFields() throws {
+    let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    let extraFields = [
+      ZipExtraField(id: .test, data: Data("extra data".utf8)),
+      ZipExtraField(id: .test2, data: Data("more extra data".utf8))
+    ]
+    try Zip.zipFiles(
+      paths: [imageURL],
+      zipFilePath: zipFilePath,
+      password: "password",
+      globalExtraFields: extraFields,
+      progress: nil
+    )
+    let header = try Zip.unzipHeader(zipFilePath)
+    XCTAssertEqual(header.extraFields, extraFields)
+  }
+  
+  func testZipHeaderEmptyExtraFieldsWhenNonConformantExtraData() throws {
+    let imageURL = url(forResource: "3crBXeO", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    try Zip.zipFiles(
+      paths: [imageURL],
+      zipFilePath: zipFilePath,
+      password: nil,
+      globalExtraData: Data("extra data".utf8),
+      progress: nil
+    )
+    let header = try Zip.unzipHeader(zipFilePath)
+    XCTAssertEqual(header.extraFields, [])
   }
   
   func testZipFileHeaderThrowsWhenFileNotFound() throws {
@@ -473,4 +521,9 @@ class ZipTests: XCTestCase {
       XCTAssertEqual(error as? ZipError, .fileNotFound)
     }
   }
+}
+
+extension ZipExtraField.ID {
+  static let test = Self(rawValue: 0xDEAD)
+  static let test2 = Self(rawValue: 0xBEEF)
 }

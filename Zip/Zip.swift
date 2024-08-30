@@ -64,7 +64,28 @@ public struct ArchiveFile {
 /// A data type for the header of a zip file.
 public struct ZipHeader {
   public let extraData: Data?
-  public let isAESEncrypted: Bool
+  public let compressionMethod: ZipCompressionMethod
+  
+  public var extraFields: [ZipExtraField]? {
+    self.extraData.flatMap { data in
+      data.withUnsafeBytes { dataPtr in
+        var byteIndex = 0
+        var fields = [ZipExtraField]()
+        while byteIndex < data.count {
+          let header = data[byteIndex..<(byteIndex + 4)].withUnsafeBytes {
+            $0.assumingMemoryBound(to: ExtraFieldHeader.self).baseAddress?.pointee
+          }
+          guard let header else { return fields }
+          byteIndex += 4
+          let byteIndexEnd = byteIndex + Int(header.dataSize)
+          guard byteIndexEnd <= data.count else { return fields }
+          fields.append(ZipExtraField(id: header.id, data: data[byteIndex..<byteIndexEnd]))
+          byteIndex = byteIndexEnd
+        }
+        return fields
+      }
+    }
+  }
   
   init(file: unzFile) throws {
     var info = unz_file_info()
@@ -84,22 +105,50 @@ public struct ZipHeader {
       )
     }
     guard result == UNZ_OK else { throw ZipError.unzipFail }
-    if info.size_file_extra >= aesHeaderSize {
-      let aesInfoStart = extraData.count - aesHeaderSize
-      let aesHeaderIdData = extraData[aesInfoStart...(aesInfoStart + 1)]
-      self.isAESEncrypted = aesHeaderIdData.withUnsafeBytes {
-        $0.loadUnaligned(as: UInt16.self) == aesHeaderId
-      }
-      self.extraData = extraData[0..<aesInfoStart]
-    } else {
-      self.extraData = info.size_file_extra > 0 ? extraData : nil
-      self.isAESEncrypted = false
-    }
+    self.extraData = info.size_file_extra > 0 ? extraData : nil
+    self.compressionMethod = ZipCompressionMethod(rawValue: info.compression_method)
   }
 }
 
-private let aesHeaderSize = 11
-private let aesHeaderId = UInt16(0x9901)
+public struct ZipCompressionMethod: RawRepresentable, Hashable, Sendable {
+  public let rawValue: UInt16
+  
+  public init(rawValue: UInt16) {
+    self.rawValue = rawValue
+  }
+}
+
+extension ZipCompressionMethod {
+  public static let aes = Self(rawValue: 99)
+  public static let deflated = Self(rawValue: 8)
+}
+
+private struct ExtraFieldHeader {
+  let id: ZipExtraField.ID
+  let dataSize: UInt16
+}
+
+public struct ZipExtraField: Hashable, Sendable, Identifiable {
+  public let id: ID
+  public let dataSize: UInt16
+  public let data: Data
+  
+  public init(id: ID, data: Data) {
+    self.id = id
+    self.dataSize = UInt16(data.count)
+    self.data = data
+  }
+}
+
+extension ZipExtraField {
+  public struct ID: Hashable, Sendable, RawRepresentable {
+    public let rawValue: UInt16
+    
+    public init(rawValue: UInt16) {
+      self.rawValue = rawValue
+    }
+  }
+}
 
 /// Zip class
 public class Zip {
@@ -356,6 +405,45 @@ public class Zip {
    - parameter zipFilePath: Destination NSURL, should lead to a .zip filepath.
    - parameter password:    Password string. Optional.
    - parameter compression: Compression strategy
+   - parameter globalExtraFields: An array of ``ZipExtraField``s to use as extra data.
+   - parameter progress: A progress closure called after unzipping each file in the archive. Double value betweem 0 and 1.
+   
+   - throws: Error if zipping fails.
+   
+   - notes: Supports implicit progress composition
+   */
+  public class func zipFiles(
+    paths: [URL],
+    zipFilePath: URL,
+    password: String?,
+    compression: ZipCompression = .DefaultCompression,
+    globalExtraFields: [ZipExtraField] = [],
+    progress: ((_ progress: Double) -> Void)?
+  ) throws {
+    var data = Data()
+    for field in globalExtraFields {
+      data.append(
+        withUnsafeBytes(of: ExtraFieldHeader(id: field.id, dataSize: field.dataSize)) { Data($0) }
+      )
+      data.append(contentsOf: [UInt8](field.data))
+    }
+    try zipFiles(
+      paths: paths,
+      zipFilePath: zipFilePath,
+      password: password,
+      compression: compression,
+      globalExtraData: data,
+      progress: progress
+    )
+  }
+  
+  /**
+   Zip files.
+   
+   - parameter paths:       Array of NSURL filepaths.
+   - parameter zipFilePath: Destination NSURL, should lead to a .zip filepath.
+   - parameter password:    Password string. Optional.
+   - parameter compression: Compression strategy
    - parameter globalExtraData: Data to attach to the "extra" field of the zip header.
    - parameter progress: A progress closure called after unzipping each file in the archive. Double value betweem 0 and 1.
    
@@ -363,6 +451,7 @@ public class Zip {
    
    - notes: Supports implicit progress composition
    */
+  @_disfavoredOverload
   public class func zipFiles(
     paths: [URL],
     zipFilePath: URL,
