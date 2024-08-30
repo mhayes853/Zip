@@ -16,17 +16,8 @@ public struct UnzipFileInfo {
     var result = unzGetCurrentFileInfo(file, &info, nil, 0, nil, 0, nil, 0)
     guard result == UNZ_OK else { throw ZipError.unzipFail }
     var extraData = Data(count: Int(info.size_file_extra))
-    result = extraData.withUnsafeMutableBytes { dataPtr in
-      unzGetCurrentFileInfo(
-        file,
-        nil,
-        nil,
-        0,
-        dataPtr.baseAddress,
-        info.size_file_extra,
-        nil,
-        0
-      )
+    result = extraData.withUnsafeMutableBytes {
+      unzGetCurrentFileInfo(file, nil, nil, 0, $0.baseAddress, info.size_file_extra, nil, 0)
     }
     guard result == UNZ_OK else { throw ZipError.unzipFail }
     self.extraData = info.size_file_extra > 0 ? extraData : nil
@@ -43,22 +34,20 @@ extension UnzipFileInfo {
   /// AES, you can check if ``compressionMethod`` is ``ZipCompressionMethod/aesEncryption``.
   public var extraFields: [ZipExtraField]? {
     self.extraData.flatMap { data in
-      data.withUnsafeBytes { dataPtr in
-        var byteIndex = 0
-        var fields = [ZipExtraField]()
-        while byteIndex < data.count {
-          let header = data[byteIndex..<(byteIndex + 4)].withUnsafeBytes {
-            $0.assumingMemoryBound(to: ExtraFieldHeader.self).baseAddress?.pointee
-          }
-          guard let header else { return fields }
-          byteIndex += 4
-          let byteIndexEnd = byteIndex + Int(header.dataSize)
-          guard byteIndexEnd <= data.count else { return fields }
-          fields.append(ZipExtraField(id: header.id, data: data[byteIndex..<byteIndexEnd]))
-          byteIndex = byteIndexEnd
+      var byteIndex = 0
+      var fields = [ZipExtraField]()
+      while byteIndex < data.count {
+        let header = data[byteIndex..<(byteIndex + 4)].withUnsafeBytes {
+          $0.assumingMemoryBound(to: ExtraFieldHeader.self).baseAddress?.pointee
         }
-        return fields
+        guard let header else { return fields }
+        byteIndex += 4
+        let byteIndexEnd = byteIndex + Int(header.dataSize)
+        guard byteIndexEnd <= data.count else { return fields }
+        fields.append(ZipExtraField(id: header.id, data: data[byteIndex..<byteIndexEnd]))
+        byteIndex = byteIndexEnd
       }
+      return fields
     }
   }
 }
