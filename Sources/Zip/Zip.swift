@@ -7,7 +7,7 @@
 //
 
 import Foundation
-@_implementationOnly import Minizip
+private import Minizip
 
 /// Zip class
 public class Zip {
@@ -100,7 +100,11 @@ extension Zip {
         ret = unzOpenCurrentFile(zip)
       }
       if ret != UNZ_OK {
-        throw ZipError.unzipFail
+        if ret == UNZ_BADPASSWORD {
+          throw ZipError.incorrectPassword
+        } else {
+          throw ZipError.unzipFail
+        }
       }
       var fileInfo = unz_file_info64()
       memset(&fileInfo, 0, MemoryLayout<unz_file_info>.size)
