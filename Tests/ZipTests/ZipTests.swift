@@ -232,6 +232,35 @@ class ZipTests: XCTestCase {
     XCTAssertTrue(fileManager.fileExists(atPath: destinationUrl.path))
   }
   
+  func testZipWithPasswordUnzipWithNoPassword() throws {
+    let imageURL1 = url(forResource: "3crBXeO", withExtension: "gif")!
+    let imageURL2 = url(forResource: "kYkLkPf", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    try Zip.zipFiles(
+      paths: [imageURL1, imageURL2],
+      zipFilePath: zipFilePath,
+      password: "password",
+      progress: nil
+    )
+    let directoryName = zipFilePath.lastPathComponent.replacingOccurrences(
+      of: ".\(zipFilePath.pathExtension)",
+      with: ""
+    )
+    let destinationUrl = try autoRemovingSandbox()
+      .appendingPathComponent(directoryName, isDirectory: true)
+    XCTAssertThrowsError(
+      try Zip.unzipFile(
+        zipFilePath,
+        destination: destinationUrl,
+        overwrite: true,
+        password: nil,
+        progress: nil
+      )
+    ) { error in
+      XCTAssertEqual(error as? ZipError, .incorrectPassword)
+    }
+  }
+  
   func testZipUnzipIncorrectPassword() throws {
     let imageURL1 = url(forResource: "3crBXeO", withExtension: "gif")!
     let imageURL2 = url(forResource: "kYkLkPf", withExtension: "gif")!
@@ -242,14 +271,13 @@ class ZipTests: XCTestCase {
       password: "password",
       progress: nil
     )
-    let fileManager = FileManager.default
     let directoryName = zipFilePath.lastPathComponent.replacingOccurrences(
       of: ".\(zipFilePath.pathExtension)",
       with: ""
     )
     let destinationUrl = try autoRemovingSandbox()
       .appendingPathComponent(directoryName, isDirectory: true)
-    try XCTAssertThrowsError(
+    XCTAssertThrowsError(
       try Zip.unzipFile(
         zipFilePath,
         destination: destinationUrl,
