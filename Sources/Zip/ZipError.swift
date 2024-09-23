@@ -1,15 +1,13 @@
 import Foundation
+private import Minizip
 
 // MARK: - ZipError
 
-/// Zip error type
 public enum ZipError: Error {
-  /// File not found
   case fileNotFound
-  /// Unzip fail
   case unzipFail
-  /// Zip fail
   case zipFail
+  case incorrectPassword
 }
 
 // MARK: - Description
@@ -21,6 +19,7 @@ extension ZipError {
     case .fileNotFound: return NSLocalizedString("File not found.", comment: "")
     case .unzipFail: return NSLocalizedString("Failed to unzip file.", comment: "")
     case .zipFail: return NSLocalizedString("Failed to zip file.", comment: "")
+    case .incorrectPassword: return NSLocalizedString("Incorrect password.", comment: "")
     }
   }
 }

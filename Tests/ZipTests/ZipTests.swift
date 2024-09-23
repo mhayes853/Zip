@@ -231,6 +231,36 @@ class ZipTests: XCTestCase {
     )
     XCTAssertTrue(fileManager.fileExists(atPath: destinationUrl.path))
   }
+  
+  func testZipUnzipIncorrectPassword() throws {
+    let imageURL1 = url(forResource: "3crBXeO", withExtension: "gif")!
+    let imageURL2 = url(forResource: "kYkLkPf", withExtension: "gif")!
+    let zipFilePath = try autoRemovingSandbox().appendingPathComponent("archive.zip")
+    try Zip.zipFiles(
+      paths: [imageURL1, imageURL2],
+      zipFilePath: zipFilePath,
+      password: "password",
+      progress: nil
+    )
+    let fileManager = FileManager.default
+    let directoryName = zipFilePath.lastPathComponent.replacingOccurrences(
+      of: ".\(zipFilePath.pathExtension)",
+      with: ""
+    )
+    let destinationUrl = try autoRemovingSandbox()
+      .appendingPathComponent(directoryName, isDirectory: true)
+    try XCTAssertThrowsError(
+      try Zip.unzipFile(
+        zipFilePath,
+        destination: destinationUrl,
+        overwrite: true,
+        password: "incorrect password",
+        progress: nil
+      )
+    ) { error in
+      XCTAssertEqual(error as? ZipError, .incorrectPassword)
+    }
+  }
 
   func testUnzipWithUnsupportedPermissions() throws {
     let permissionsURL = url(forResource: "unsupported_permissions", withExtension: "zip")!

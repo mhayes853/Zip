@@ -1,5 +1,5 @@
 import Foundation
-@_implementationOnly import Minizip
+internal import Minizip
 
 // MARK: - UnzipFileInfo
 
