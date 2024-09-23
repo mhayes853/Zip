@@ -96,15 +96,17 @@ extension Zip {
     repeat {
       if let cPassword = password?.cString(using: String.Encoding.ascii) {
         ret = unzOpenCurrentFilePassword(zip, cPassword)
-      } else {
-        ret = unzOpenCurrentFile(zip)
-      }
-      if ret != UNZ_OK {
         if ret == UNZ_BADPASSWORD {
           throw ZipError.incorrectPassword
-        } else {
-          throw ZipError.unzipFail
         }
+      } else {
+        ret = unzOpenCurrentFile(zip)
+        if ret == UNZ_PARAMERROR {
+          throw ZipError.incorrectPassword
+        }
+      }
+      if ret != UNZ_OK {
+        throw ZipError.unzipFail
       }
       var fileInfo = unz_file_info64()
       memset(&fileInfo, 0, MemoryLayout<unz_file_info>.size)
